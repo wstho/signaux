@@ -1,4 +1,4 @@
-elephant @ git+ssh://git@github.com/NeuralEnsemble/elephant.git
+elephant @ git+https://github.com/NeuralEnsemble/elephant.git
 matplotlib>=3.8.2
 neo>=0.14.0
 numpy>=2.3.3
