@@ -1,4 +1,4 @@
-elephant>=1.1.1
+elephant @ git@github.com:NeuralEnsemble/elephant.git
 matplotlib>=3.8.2
 neo>=0.14.0
 numpy>=2.3.3

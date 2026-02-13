@@ -6,6 +6,7 @@ Created on Thu May 11 10:56:13 2023
 @author: wst
 """
 import os
+from pathlib import Path
 import shutil
 import json
 import copy
@@ -14,14 +15,12 @@ import numpy as np
 
 from neo import SpikeTrain
 from elephant.spike_train_generation import StationaryLogNormalProcess as SLNP
-from elephant.conversion import BinnedSpikeTrain as BST
 from elephant import statistics as ele_stats
-from elephant.spike_train_correlation import correlation_coefficient as cc
-from quantities import ms, s, Hz
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-from npencoder import NpEncoder
+from quantities import s, Hz
+
+
+from signaux.npencoder import NpEncoder
 
 class Signaux(object):
     
@@ -116,8 +115,6 @@ class Signaux(object):
         if self.role ==  'master' and self.rc is not None:
             self.initialize_parallel()
             
-            
-
     def initialize_parallel(self):
         """initialize the parallel computing environment"""
         if self.rc is not None:
@@ -188,7 +185,7 @@ class Signaux(object):
         return
                         
     def check_for_csv(self):
-        """Check for CSV files or generate them if needed"""
+        """Check for csv files or generate them if needed"""
         
         for i in self.inputs:
             print(f'Preparing input for {i}.')
@@ -362,11 +359,9 @@ class Signaux(object):
                     n_inputs_per_connection = None, sigma = 0.6, variability = 1, 
                     pauses = None, bursts = None, jitter = 0.02):
         
-        """Generate CSV files with spike trains"""
-        
-        
-        
-        
+        """
+        Generate csv files with spike trains
+        """
         
         rng = np.random.default_rng()
         file_name = os.path.join(self.network_path, 'input_csvs', f"{input_type}_{postsynaptic}_input.csv")
@@ -432,9 +427,9 @@ class Signaux(object):
             except PermissionError:
                 raise PermissionError(f"Cannot write to {file_name}. Check write permissions.")
             except IOError as e:
-                raise IOError(f"Failed to write CSV file {file_name}: {e}")
+                raise IOError(f"Failed to write csv file {file_name}: {e}")
             except Exception as e:
-                raise Exception(f"Unexpected error writing CSV for {input_type}: {e}")
+                raise Exception(f"Unexpected error writing csv for {input_type}: {e}")
                 
         self.spike_train_counter +=  len(self.csv_spikes)
         self.total_spikes[str(postsynaptic)][input_type] = self.csv_spikes
@@ -443,14 +438,14 @@ class Signaux(object):
     
         
     def import_csv_spikes(self, csv_file):
-        """import spike data from a CSV file"""
+        """import spike data from a csv file"""
         if not os.path.exists(csv_file):
-            raise FileNotFoundError(f"CSV file not found: {csv_file}")
+            raise FileNotFoundError(f"csv file not found: {csv_file}")
             
         return [np.sort(np.fromstring(row, sep = ',', dtype = float)) for row in open(csv_file, "r")]
     
     def random_csv(self, postsynaptic, input_type, signal):
-        """select a random CSV file from a directory"""
+        """select a random csv file from a directory"""
         try:
             if signal and 'signal_csv_file' in self.inputs[input_type]:
                 if 'p_signal' in self.inputs[input_type]:
@@ -526,6 +521,7 @@ class Signaux(object):
         return
     
     def process_neuron_parallel(self, neurons, signals, inputs):
+        
         self.output = {}
         for n in neurons:
             if n in signals:
@@ -631,69 +627,10 @@ class Signaux(object):
         return
     
     def use_default_inputs(self):
-        self.defaults = {
-            "dSPN" : {
-                "generator" : "poisson",
-                "type" : "GABA",
-                "synapse_density" : "1-0.98*(exp(-(0.9*d/50e-6)**2))",
-                "frequency" : 0.6,
-                "population_unit_correlation" : 0.1,
-                "jitter" : 0.001,
-                "conductance" : 100e-12,
-                "mod_file": "tmGabaA",
-                "parameter_file": "$SNUDDA_DATA/input_config/lateral_dSPN_synapse.json",
-                "num_inputs" : 1500
-            },
-            "M1" : {
-                "generator" : "poisson",
-                "type" : "AMPA_NMDA",
-                "synapse_density" : "0.1 + 0.9*exp(-((d - 100e-6)/100e-6)**2)",
-                "frequency" : 5,
-                "population_unit_correlation" : 0.1,
-                "jitter" : 0.000,
-                "conductance" : 150e-12,
-                "mod_file": "tmGlut_double",
-                "parameter_file": "$SNUDDA_DATA/input_config/M1_synapse.json",
-                "num_inputs" : 10
-             },
-            "proto" : {
-                "generator" : "poisson",
-                "type" : "GABA",
-                "synapse_density" : "exp(-(0.7*d/20e-6)**2)",
-                "frequency" : 50,
-                "population_unit_correlation" : 0.1,
-                "jitter" : 0.00,
-                "conductance" : 1200e-12,
-                "mod_file": "tmGabaA",
-                "parameter_file": "$SNUDDA_DATA/input_config/proto_synapse.json",
-                "num_inputs" : 10,
-                "p_soma_synapses": 1
-             },
-            "STN" : {
-                "generator" : "poisson",
-                "type" : "AMPA_NMDA",
-                "synapse_density" : "0.1 + 0.9*exp(-((d - 100e-6)/100e-6)**2)",
-                "frequency" : 5,
-                "population_unit_correlation" : 0.1,
-                "jitter" : 0.000,
-                "conductance" : 200e-12,
-                "mod_file": "tmGlut_double",
-                "parameter_file": "$SNUDDA_DATA/input_config/STN_synapse.json",
-                "num_inputs" : 120
-             },
-            "SNr" :{
-               "generator" : "poisson",
-               "synapse_density" : "exp(-((0.8*d - 50e-6)/50e-6)**2)",
-               "type" : "GABA",
-               "frequency" : 25,
-               "population_unit_correlation" : 0.1,
-               "jitter" : 0.001,
-               "conductance" : 150e-12,
-               "mod_file": "tmGabaA",
-               "parameter_file": "$SNUDDA_DATA/input_config/intra_synapse.json",
-               "num_inputs" : 100
-           }
-        }
+        
+        file_path = Path(__file__).parent.parent / 'data' / 'default_inputs.json'
+        with open(file_path) as f:
+            self.defaults = json.load(f)
         return
 
     
@@ -713,95 +650,7 @@ class Signaux(object):
 
         return [frs, cvs]
 
-    def plot_spikes(self, postsynaptic, ax = None):
-        """Plot spike rasters for visualization"""
-        pal = sns.color_palette('Set2', n_colors = len(self.inputs.keys())+1)
-        
-        if ax is None:
-            fig, ax = plt.subplots(figsize = [20, 12])
-        y = 0
-        for idx, trainset in enumerate(self.total_spikes[str(postsynaptic)].values()):
-            for train in trainset:
-                ax.scatter(train, [y]*len(train), c = pal[idx], marker = '|', s = 5)
-                y +=  1
-            
-        try:
-            start = self.start
-        except:
-            start = 0 
-        try:
-            end = self.end
-        except:
-            end = 5
-            
-        ax.set_xlim(start, end)
-        ax.set_xlabel('Time (s)')
-        ax.set_ylabel('Synapse')
-        sns.despine()
-        plt.show()
-        
-    def plot_ISI_distribution(self, postsynaptic = 0, ax = None, separate_plots = False):
-        """Plot inter-spike interval distributions of unique spike trains"""
-        pal = sns.color_palette('Set2', n_colors = len(self.inputs.keys())+1)
-        
-        unique_trains  = self.get_unique_trains(str(postsynaptic))
-            
-        if ax is None:
-            if separate_plots:
-                fig, axes = plt.subplots(nrows = len(unique_trains))
-                
-                for i, spiketrain in enumerate(unique_trains):
-                    isis = ele_stats.isi(spiketrain)*1000      #s --> ms  
-                    sns.kdeplot(x =  isis, ax =  axes[i], clip = (0, None), cut = 0, color = pal[i])
-                
-                for ax in axes[:-1]:
-                    ax.set_xticks([])
-                    ax.set_yticks([])
-                axes[-1].set_xlabel('ISI (ms)')
-                axes[-1].set_yticks([])
-                
-            else:
-                fig, ax = plt.subplots(nrows = 1)
-                for i, spiketrain in enumerate(unique_trains):
-                    isis = ele_stats.isi(spiketrain)*1000         #s --> ms        
-                    sns.kdeplot(x = isis, ax = ax, clip = (0, None), cut = 0, color = pal[i])
-                    
-                ax.set_xlabel('ISI (ms)')
-                ax.set_yticks([])
-                ax.set_xlim(0, None)
-                    
-        else:
-            for i, spiketrain in enumerate(unique_trains):
-                isis = ele_stats.isi(spiketrain)*1000         #s --> ms        
-                sns.kdeplot(x = isis, ax = ax, clip = (0, None), cut = 0, color = pal[i])
-                
-            ax.set_xlabel('ISI (ms)')
-            ax.set_yticks([])
-            ax.set_xlim(0, None)
-        sns.despine()
-        plt.show()
-        
-        
-    def plot_input_correlation(self, ax = None, binsize = 10, cmap = 'viridis'):
-        """"Plot correlation matrix of spike trains """
-        if ax ==  None:
-            fig, ax = plt.subplots()
-        trains = []
-        for st in sorted(self.csv_spikes, key = lambda x: x[0]):
-            st = [x for x in st if (x < self.end) & (x> self.start)]
-            trains.append(SpikeTrain(times = st*s, t_start = self.start*s, t_stop = self.end*s))
-
-        cc_matrix = cc(BST(trains, binsize = binsize*ms))
-        im = ax.imshow(cc_matrix, clim = (-1, 1), cmap = cmap) 
-        fig.colorbar(im, orientation = 'vertical', label = 'Correlation Coefficient')
-
-        ax.set_title('Spike Time Correlation')
-        ax.set_xlabel('Input ID')
-        ax.set_ylabel('Input ID')
-        plt.show()
-        sns.despine()
-        plt.show()
-        
+ 
     
 #%%
 
@@ -815,19 +664,25 @@ if __name__ ==  "__main__":
     except FileExistsError:
         pass 
     
-    # import ray
-    ray_parallel = False
-    # ray.shutdown()
-    # ray.init(num_cpus = 7)
 
-    # if ray.is_initialized():
-    #     ray_parallel = True
+    ray_parallel = False
+    if ray_parallel:
+        import ray
+        ray.shutdown()
+        ray.init(num_cpus = 7)
     
-    dummy = list(np.arange(0, 100))
-    sg = Signaux(network_path, ray_parallel = ray_parallel,  postsynaptic = dummy, input_defs = [{'dSPN': {'generator': 'csv','n_presynaptic':10,"num_inputs" : 50, 'frequency': 1.4, 'variability' : 1,'end':5, 'bursts': [[1.25,1.5, 50, 100]]}}])
+        if ray.is_initialized():
+            ray_parallel = True
+        else:
+            ray_parallel = False
+            print('Ray not initialised, running in serial.')
+    
+    dummy_network = list(np.arange(0, 10))
+    sg = Signaux(network_path, ray_parallel = ray_parallel,  postsynaptic = dummy_network, input_defs = [{'dSPN': {'generator': 'csv','n_presynaptic':10,"num_inputs" : 50, 'frequency': 1.4, 'variability' : 1,'end':5, 'bursts': [[1.25,1.5, 50, 100]]}}])
     sg.check_for_csv()
     sg.write_json()
         
-    # ray.shutdown()
+    if ray_parallel:
+        ray.shutdown()
 
 
