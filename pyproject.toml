@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signaux"
+version = "0.0.1"
+dependencies = [
+"elephant>=1.1.1",
+"matplotlib>=3.8.2",
+"neo>=0.14.0",
+"numpy>=2.3.3",
+"quantities>=0.16.1",
+"ray>=2.24.0",
+"seaborn>=0.13.2"
+]
+requires-python = ">=3.11"
+authors = [
+  {name = "W.S. Thompson", email = "scottwilliamthompson@gmail.com"},
+]
+readme = "README.md"
