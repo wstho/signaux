@@ -627,6 +627,7 @@ class Signaux(object):
         return
     
     def use_default_inputs(self):
+        """this file could be configured for different uses, currently SNr specific"""
         
         file_path = Path(__file__).parent.parent / 'data' / 'default_inputs.json'
         with open(file_path) as f:
