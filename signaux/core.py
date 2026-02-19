@@ -5,6 +5,7 @@ Created on Thu May 11 10:56:13 2023
 
 @author: wst
 """
+
 import os
 from pathlib import Path
 import shutil
@@ -18,16 +19,14 @@ from elephant.spike_train_generation import StationaryLogNormalProcess as SLNP
 from elephant import statistics as ele_stats
 
 from quantities import s, Hz
-
-
-from signaux.npencoder import NpEncoder
+from .npencoder import NpEncoder
 
 class Signaux(object):
     
-    """creates input spike trains for Snudda"""
+    """creates and manipulates synthetic spike trains"""
     
     def __init__(self, network_path, file_name = 'input_config.json', data_path = None, ray_parallel = False, rc = None, role = None, 
-                 input_defs = None, inputs = None, neuron_class = None, postsynaptic = None, signals = None, seed = 23, merge_okay = True):
+                 input_defs = None, inputs = None, neuron_class = None, postsynaptic = None, seed = 23, merge_okay = True):
        
         """
         network_path (str): path to directory containing the network
@@ -41,7 +40,6 @@ class Signaux(object):
                                  If passed to master, inputs must contain complete information (ie., all parameters specified).
         neuron_class(str, optional): specified neuron_class to create input for
         postsynaptic (list, optional): specified neuron ids to create input for
-        signals (list, optional): specified neuron ids that receive a special signal
         seed (int, optional): seed for random generator
         merge_okay (bool, optional): whether or not to merge with existing input file
         
@@ -58,8 +56,11 @@ class Signaux(object):
         self.all_parameters = ['generator', 'type', 'frequency', 'start', 'end', 'population_unit_correlation', 
                               'jitter', 'conductance', 'mod_file', 'parameter_file', 'num_inputs']
         
-        
         self.sigma_map = {'proto':0.7, 'STN': 0.7, 'SNr': 0.6}
+        
+        self.default_start = 0
+        self.default_end = 5
+
 
         if inputs ==  None:
             self.use_default_inputs()
@@ -85,19 +86,14 @@ class Signaux(object):
             #if no postsynaptic neurons are specified create input for just one single neuron
             self.postsynaptic = [0]
             
-        self.total_spikes = {}
+        self.total_trains = {}
         
         for n in self.postsynaptic:
-            self.total_spikes[str(n)] = {}
-        self.spike_train_counter = 0
+            self.total_trains[str(n)] = {}
         
-        if signals:
-            self.signals = signals
-        else:
-            self.signals = []
+        self.signals = []
             
         self.merge_okay = merge_okay
-        
         self.rng = np.random.default_rng(seed = seed)
 
         self.workers_initialised = False
@@ -116,7 +112,7 @@ class Signaux(object):
             self.initialize_parallel()
             
     def initialize_parallel(self):
-        """initialize the parallel computing environment"""
+        """initialize the ipyparallel environment"""
         if self.rc is not None:
 
             self.d_view = self.rc[:]
@@ -130,11 +126,10 @@ class Signaux(object):
                         "file_name": self.file_name,
                         "postsynaptic": self.postsynaptic,
                         "inputs": self.inputs, 
-                        "signals": self.signals,
                          },
                         block = True)
 
-            cmd_str = ("sg = Signaux(network_path = network_path, role = 'worker', file_name = file_name, postsynaptic = postsynaptic, signals = signals, inputs = inputs)")
+            cmd_str = ("sg = Signaux(network_path = network_path, role = 'worker', file_name = file_name, postsynaptic = postsynaptic, inputs = inputs)")
             self.d_view.execute(cmd_str, block = True)
             self.workers_initialised = True
             
@@ -146,9 +141,8 @@ class Signaux(object):
         
         for i in inputs:              
             if isinstance(i, dict):
-
                 for j in list(i.keys()):
-                    print('Adding ' + str(j) + ' input with custom parameters.')
+                    print(f'Adding {i} input with custom parameters.')
                     if j in list(self.defaults.keys()):
                         if 'n_presynaptic' in i[j].keys():
                             if isinstance(i[j]['n_presynaptic'], list):
@@ -173,19 +167,20 @@ class Signaux(object):
                         else:
                             self.inputs[j] = self.defaults[j.split('_')[0]].copy()
                             self.inputs[j].update(i[j])
+                            
                     else:
                         assert all(param in list(i[j].keys()) for param in self.all_parameters), "Incomplete parameter set for input {input_name}.".format(input_name = str(j))
                         self.inputs[j] = i[j]             
+                        
             elif isinstance(i, str):
-                if i in list(self.defaults.keys()):
-                    print('Adding ' + i + ' input with default parameters.')
-                    self.inputs[i] = self.defaults[i].copy()
-                else:
-                    print('Unknown input type, please provide complete specifications.')  
+                assert i in list(self.defaults.keys()), 'Unknown input type, please provide complete specifications.'
+                print(f'Adding {i} input with default parameters.')
+                self.inputs[i] = self.defaults[i].copy()
+                
         return
                         
-    def check_for_csv(self):
-        """Check for csv files or generate them if needed"""
+    def csv_inputs(self):
+        """Checks for existing csv files or generates them if needed"""
         
         for i in self.inputs:
             print(f'Preparing input for {i}.')
@@ -211,20 +206,17 @@ class Signaux(object):
                             self.n_presynaptic = self.inputs[i]['n_presynaptic']
                             if 'num_inputs' in list(self.inputs[i].keys()):
                                 n_inputs_per_connection = self.inputs[i]['num_inputs']
-                                if isinstance(n_inputs_per_connection, list):
-                                    n_inputs_per_connection = round(self.rng.normal(loc = n_inputs_per_connection[0], 
-                                                                               scale = n_inputs_per_connection[1]))
-                                assert isinstance(n_inputs_per_connection, int), 'n_inputs_per_connection must be an integer'
-                            else:
-                                n_inputs_per_connection = 1
+                            #     if isinstance(n_inputs_per_connection, list):
+                            #         n_inputs_per_connection = round(self.rng.normal(loc = n_inputs_per_connection[0], 
+                            #                                                    scale = n_inputs_per_connection[1]))
+                            #     assert isinstance(n_inputs_per_connection, int), 'n_inputs_per_connection must be an integer'
+                            # else:
+                            #     n_inputs_per_connection = 1
 
                 else: 
                     print('No csv file provided. Generating now.')
                     self.setup_csv(i)
                     
-                    
-                
-
             elif self.inputs[i]['generator'] ==  'poisson':
                 print('Using poisson input.')
                 
@@ -251,27 +243,30 @@ class Signaux(object):
         
         if 'n_presynaptic' in list(self.inputs[i].keys()):
             self.n_presynaptic = self.inputs[i]['n_presynaptic']
-            if 'num_inputs' in list(self.inputs[i].keys()):
-                n_inputs_per_connection = self.inputs[i]['num_inputs']
-                if isinstance(n_inputs_per_connection, list):
-                    n_inputs_per_connection = round(self.rng.normal(loc = n_inputs_per_connection[0], 
-                                                              scale = n_inputs_per_connection[1]))
-                assert isinstance(n_inputs_per_connection, int), 'n_inputs_per_connection must be an integer'
-            else:
-                n_inputs_per_connection = 1
+            # if 'num_inputs' in list(self.inputs[i].keys()):
+                # n_inputs_per_connection = self.inputs[i]['num_inputs']
+                # if isinstance(n_inputs_per_connection, list):
+                #     n_inputs_per_connection = round(self.rng.normal(loc = n_inputs_per_connection[0], 
+                #                                               scale = n_inputs_per_connection[1]))
+                # assert isinstance(n_inputs_per_connection, int), 'n_inputs_per_connection must be an integer'
+            # else:
+            #     n_inputs_per_connection = 1
                 
         else:
-            self.n_presynaptic = None
-            n_inputs_per_connection = n_inputs
+            self.n_presynaptic = n_inputs
+            # n_inputs_per_connection = n_inputs
             
         if 'start' in list(self.inputs[i].keys()):
-            self.start = self.inputs[i]['start']
+            start = self.inputs[i]['start']
         else:
-            self.start = 0
+            start = self.default_start
+            self.inputs[i]['start'] = start
+
         if 'end' in list(self.inputs[i].keys()):
-            self.end = self.inputs[i]['end']
+            end = self.inputs[i]['end']
         else:
-            self.end = 5
+            end = self.default_end
+            self.inputs[i]['end'] = end
             
         sigma = self.sigma_map.get(i.split('_')[0], 1)
             
@@ -298,83 +293,85 @@ class Signaux(object):
                 print('Running in parallel with ipyparallel.')
                 
                 # collect tasks for parallel execution
-                tasks = []
+                postsynaptic_configs = []
                 for n in self.postsynaptic:
-                    # create config dict for each task
+                    # config dict for each task
                     input_config = {
                         'input_type': i,
                         'postsynaptic': n,
                         'frequency': self.inputs[i]['frequency'],
-                        'start': self.start,
-                        'end': self.end,
-                        'n_presynaptic': self.n_presynaptic,
-                        'n_inputs_per_connection': n_inputs_per_connection,
+                        'n_presynaptic': self.inputs[i]['n_presynaptic'],
                         'sigma': sigma,
                         'variability': variability,
                         'pauses': pauses,
                         'bursts': bursts,
-                        'network_path': self.network_path
+                        'network_path': self.network_path,
+                        'start': start, 
+                        'end': end
                     }
-                    tasks.append(input_config)
+                    postsynaptic_configs.append(input_config)
+                self.tasks = postsynaptic_configs
+                print(f"Distributing {len(postsynaptic_configs)} neurons across {len(self.d_view)} workers.")
+                self.d_view.scatter('postsynaptic_configs', postsynaptic_configs, block=True)
                 
-                print(f"Distributing {len(tasks)} tasks across {len(self.d_view)} workers.")
-
-                self.d_view.scatter('task_list', tasks, block=True)
-
-                cmd_str = ("sg.generate_csv(task_list)")
+                print(f"Processing {len(postsynaptic_configs)} neurons in parallel.")
                 
-                self.d_view.execute(cmd_str, block=True)
+                self.d_view.execute("trains = sg.generate_csv_parallel(postsynaptic_configs)", block=True)
+                
+                try:                       
+                    engines = self.d_view['trains']
+                    for engine in engines:
+                        for n in engine.keys():
+                            self.total_trains[str(n)][i] = engine[n]['train']
 
-                try:
-                    print(f"Processing {len(tasks)} tasks in parallel.")
-                    results = async_results.get()
-                    
-                    # process results
-                    for result in results:
-                        n = result['postsynaptic']
-                        input_type = result['input_type']
-                        self.total_spikes[str(n)][input_type] = result['csv_spikes']
-                        self.spike_train_counter +=  len(result['csv_spikes'])
-                    
-                    print(f"Completed all {len(tasks)} tasks")
+                    print(f"Completed parallel execution.")
                 except Exception as e:
                     print(f"Error in parallel execution: {e}")
             else:
                 # sequential execution
                 for n in self.postsynaptic:
-                    self.generate_csv(input_type = i, postsynaptic = n, 
-                                    frequency = self.inputs[i]['frequency'],
-                                    n_presynaptic = self.n_presynaptic, 
-                                    n_inputs_per_connection = n_inputs_per_connection, 
+                    freq = self.inputs[i]['frequency']
+                    n_pre = self.inputs[i]['n_presynaptic']
+                    filename, train = self.generate_csv(input_type = i, postsynaptic = n, 
+                                    frequency = freq,
+                                    n_presynaptic = n_pre, 
                                     sigma = sigma, variability = variability, 
-                                    pauses = pauses, bursts = bursts)
-
+                                    pauses = pauses, bursts = bursts, start = start, end = end)
+                    self.total_trains[str(n)][i] = train
         return
     
+    def generate_csv(self, input_type = None, postsynaptic = None, frequency = None, n_presynaptic = None, sigma = 0.6, variability = 1, 
+                    pauses = None, bursts = None, jitter = 0.02, start= 0, end = 5, config = None):
     
-    
-    
-    
-    def generate_csv(self, input_type, postsynaptic, frequency, n_presynaptic = None, 
-                    n_inputs_per_connection = None, sigma = 0.6, variability = 1, 
-                    pauses = None, bursts = None, jitter = 0.02):
-        
         """
         Generate csv files with spike trains
         """
         
+        if config is not None: 
+            input_type = config['input_type']
+            postsynaptic = config['postsynaptic']
+            frequency = config['frequency']
+            n_presynaptic = config.get('n_presynaptic')
+            sigma = config.get('sigma', 0.6)
+            variability = config.get('variability', 1)
+            pauses = config.get('pauses')
+            bursts = config.get('bursts')
+            start = config.get('start')
+            end = config.get('end')
+
         rng = np.random.default_rng()
         file_name = os.path.join(self.network_path, 'input_csvs', f"{input_type}_{postsynaptic}_input.csv")
-        self.csv_spikes = []
+        
+        start = start*s
+        end = end*s
 
         f = np.abs(rng.normal(loc = frequency, scale = variability))
-        st = list(SLNP(rate = f*Hz, sigma = sigma, t_start = self.start*s, t_stop = self.end*s).generate_spiketrain().magnitude.flatten())
+        st = list(SLNP(rate = f*Hz, sigma = sigma, t_start = start, t_stop = end).generate_spiketrain().magnitude.flatten())
        
-        while len(st) < 1:
-            st = list(SLNP(rate = f*Hz, sigma = sigma, t_start = self.start*s, t_stop = self.end*s).generate_spiketrain().magnitude.flatten())
+        while len(st) < 1:          ##dirty fix to ensure there is always a spike
+            st = list(SLNP(rate = f*Hz, sigma = sigma, t_start = start, t_stop = end).generate_spiketrain().magnitude.flatten())
         
         if bursts:
-            train = st
             for burst in bursts: 
                 if len(burst) ==  4:
                     proportion = burst[3]
@@ -393,37 +390,31 @@ class Signaux(object):
                     burst_train = list(SLNP(rate = f*Hz, sigma = sigma, 
                                            t_start = (burst[0] + burst_jitter_a)*s,                                                   
                                            t_stop = (burst[1] + burst_jitter_b)*s).generate_spiketrain().magnitude.flatten())
-                    train = [t for t in train if (t < burst[0] + burst_jitter_a) | 
+                    st = [t for t in st if (t < burst[0] + burst_jitter_a) | 
                                  (t > burst[1] + burst_jitter_b)]
-                    train +=  burst_train
-        else:
-            train = st
+                    st +=  burst_train
+
             
-        for k in range(n_inputs_per_connection):   
-            self.csv_spikes.append(train)
+        # for k in range(n_inputs_per_connection):   
+        #     csv_spikes.append(train)
             
         if pauses:
-            temp = []
-            for st in self.csv_spikes:
-                train = st
-                for pause in pauses: 
-                    if len(pause) ==  3:
-                        proportion = pause[2]
-                    else:
-                        proportion = 1
-                    i = rng.integers()(0, n_presynaptic-1)
-                    if i in range(int(np.rint(n_presynaptic*proportion))):
-                        train = [t for t in train if (t < pause[0]) | (t > pause[1])] 
+            for pause in pauses: 
+                if len(pause) ==  3:
+                    proportion = pause[2]
+                else:
+                    proportion = 1
+                i = rng.integers()(0, n_presynaptic-1)
+                if i in range(int(np.rint(n_presynaptic*proportion))):
+                    st = [t for t in st if (t < pause[0]) | (t > pause[1])] 
 
-                temp.append(train)
-            self.csv_spikes = temp
             
         if self.network_path !=  os.path.join(self.data_path, 'test'):
             try:
                 os.makedirs(os.path.join(self.network_path, 'input_csvs'), exist_ok = True)
                 with open(file_name, 'w+', newline = '') as csvfile:
                     writer = csv.writer(csvfile, delimiter = ',')
-                    writer.writerows(self.csv_spikes)
+                    writer.writerows([st])
             except PermissionError:
                 raise PermissionError(f"Cannot write to {file_name}. Check write permissions.")
             except IOError as e:
@@ -431,21 +422,28 @@ class Signaux(object):
             except Exception as e:
                 raise Exception(f"Unexpected error writing csv for {input_type}: {e}")
                 
-        self.spike_train_counter +=  len(self.csv_spikes)
-        self.total_spikes[str(postsynaptic)][input_type] = self.csv_spikes
-        
-        return file_name
+        return file_name, st
     
+
+    def generate_csv_parallel(self, configs):
         
-    def import_csv_spikes(self, csv_file):
-        """import spike data from a csv file"""
+        assert isinstance(configs, list), "Ensure a list of arguments are passed to generate_csv_parallel"
+        parallel_trains = {}
+        for config in configs:
+            file_name, train = self.generate_csv(config = config)
+            parallel_trains[config['postsynaptic']] = {'file_name':file_name, 'train': train}
+        return parallel_trains
+        
+        
+    def import_csv_train(self, csv_file):
+        """import spike train data from a csv file"""
         if not os.path.exists(csv_file):
             raise FileNotFoundError(f"csv file not found: {csv_file}")
             
         return [np.sort(np.fromstring(row, sep = ',', dtype = float)) for row in open(csv_file, "r")]
     
     def random_csv(self, postsynaptic, input_type, signal):
-        """select a random csv file from a directory"""
+        """select a random csv file from a given directory"""
         try:
             if signal and 'signal_csv_file' in self.inputs[input_type]:
                 if 'p_signal' in self.inputs[input_type]:
@@ -470,7 +468,7 @@ class Signaux(object):
                         if entry.is_file() and entry.name.endswith('.csv')
                     ]
                 
-                # get cached list of CSV files
+                # get cached list of csv files
                 csv_files = self._csv_cache[csv_dir]
                 file_name = self.rng.choice(csv_files)
                 
@@ -499,7 +497,7 @@ class Signaux(object):
             d_view.scatter("neuron_idx", self.postsynaptic, block = True)
             d_view.push({"inputs":self.inputs}, block = True)
 
-            cmd_str = ("sg.process_neuron_parallel(neurons = neuron_idx, signals = signals, inputs = inputs)")
+            cmd_str = ("sg.process_neuron_parallel(neurons = neuron_idx, inputs = inputs)")
             d_view.execute(cmd_str, block = True)
             output_list = d_view.gather("sg.output", block = True)
             self.output = {k: v for d in output_list for k, v in d.items()} 
@@ -520,9 +518,10 @@ class Signaux(object):
         
         return
     
-    def process_neuron_parallel(self, neurons, signals, inputs):
+    def process_neuron_parallel(self, neurons, inputs):
         
         self.output = {}
+        signals = []
         for n in neurons:
             if n in signals:
                 signal = True
@@ -581,9 +580,10 @@ class Signaux(object):
         
         """
         unique_trains = []
-        for train in self.total_spikes[postsynaptic].values():
+        for train in self.total_spikes[str(postsynaptic)].values():
             unique_trains.append(train[0])
         return unique_trains
+    
     
     def add_burst(self, postsynaptic, input_type, start, end, frequency, proportion = 1, sigma = 0.6, jitter = 0.02, variability = 1): 
         """add burst to existing spiketrain"""
@@ -634,30 +634,28 @@ class Signaux(object):
         return
 
     
-    def calculate_FR_CV(self, postsynaptic = 0):
-        """"Calculate firing rate and CV_ISI of spike trains for confirmation"""
-        frs = []
-        cvs = []
-        
-        unique_trains = self.get_unique_trains(str(postsynaptic))
-
-        for spiketrain in unique_trains:
-            spiketrain = [x for x in spiketrain if (x < self.end) & (x> self.start)]
-            st = SpikeTrain(times = spiketrain*s, t_start = self.start*s, t_stop = self.end*s)
+    def calculate_fr_cv(self, postsynaptic = 0):
+        """"Calculate firing rate and CV_ISI of spike trains"""
+        frs = {}
+        cvs = {}
+    
+        for input_name, spiketrain in self.total_trains[str(postsynaptic)].items():
+            start = self.inputs[input_name]['start']
+            end = self.inputs[input_name]['end']
+            spiketrain = [x for x in spiketrain if (x < end) & (x> start)]
+            st = SpikeTrain(times = spiketrain*s, t_start = start*s, t_stop =end*s)
             
-            frs.append(len(spiketrain)/(self.end -self.start))
-            cvs.append(ele_stats.cv(ele_stats.isi(st)))
+            frs[input_name] = len(spiketrain)/(end -start)
+            cvs[input_name]  = ele_stats.cv(ele_stats.isi(st))
 
-        return [frs, cvs]
+        return {'firing_rate': frs, 'CV_isi': cvs}
 
- 
     
 #%%
 
 if __name__ ==  "__main__":
     
     net_name = 'test'
-    os.chdir('/Users/wst/Desktop/Karolinska/Simulation/Neuron/')
     network_path = os.path.join(os.getcwd(), "networks", net_name)
     try:
         os.mkdir(network_path)
@@ -679,7 +677,7 @@ if __name__ ==  "__main__":
     
     dummy_network = list(np.arange(0, 10))
     sg = Signaux(network_path, ray_parallel = ray_parallel,  postsynaptic = dummy_network, input_defs = [{'dSPN': {'generator': 'csv','n_presynaptic':10,"num_inputs" : 50, 'frequency': 1.4, 'variability' : 1,'end':5, 'bursts': [[1.25,1.5, 50, 100]]}}])
-    sg.check_for_csv()
+    sg.csv_inputs()
     sg.write_json()
         
     if ray_parallel:
